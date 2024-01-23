@@ -2,7 +2,7 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.core.cache import cache
 from stock.models import Stock, AccountCurrency, AccountStock
-from stock.forms import BuySellForm
+from stock.forms import BuySellForm, SellForm  # Добавьте импорт SellForm
 
 def stock_list(request):
     stocks = Stock.objects.all()
@@ -91,3 +91,37 @@ def account(request):
         'stocks': stocks
     }
     return render(request, 'account.html', context)
+
+@login_required
+def stock_sell(request, pk):
+    stock = get_object_or_404(Stock, pk=pk)
+    form = SellForm(request.POST or None)
+
+    if request.method == 'POST' and form.is_valid():
+        amount_to_sell = form.cleaned_data['amount']
+        acc_stock = get_object_or_404(AccountStock, account=request.user.account, stock=stock)
+
+        if acc_stock.amount < amount_to_sell:
+            form.add_error(None, 'Недостаточно акций для продажи')
+        else:
+            # Вычисляем сумму продажи
+            sale_amount = amount_to_sell * acc_stock.stock.get_random_price()
+
+            acc_stock.amount -= amount_to_sell
+            acc_stock.save()
+
+            # Обновляем баланс пользователя
+            acc_currency = AccountCurrency.objects.get(
+                account=request.user.account, 
+                currency=stock.currency
+            )
+            acc_currency.amount += sale_amount
+            acc_currency.save()
+
+            return redirect('stock:account')
+
+    context = {
+        'form': form,
+        'stock': stock
+    }
+    return render(request, 'stock_sell.html', context)
